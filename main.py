@@ -58,8 +58,8 @@ class Calendar:
 
     def __str__(self):
         output = self.header + "\n"
-        for thing in self.events:
-            output += str(thing)
+        for event in self.events:
+            output += str(event)
         output += self.footer + "\n"
 
         return output
