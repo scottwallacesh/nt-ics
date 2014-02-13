@@ -37,6 +37,13 @@ import urllib2
 import json
 import time
 
+#===================
+# Flask stuff for Google App Engine
+#===================
+from flask import Flask
+app = Flask(__name__)
+#===================
+
 class Calendar:
     header = "BEGIN:VCALENDAR\nX-WR-CALNAME:National Trust Events\nVERSION:2.0\nPRODID:-//Scott Wallace//NONSGML nt-ics//EN"
     footer = "END:VCALENDAR"
@@ -96,7 +103,8 @@ class Event:
 
             return output
 
-if __name__ == "__main__":
+@app.route("/")
+def build_calendar():
     # Fetch the original data
     try:
         orig_data = urllib2.urlopen("%s?apiKey=%s&distance=%s&period=%s&latitude=%s&longitude=%s&SortBy=%s&searchType=%s" % (ENDPOINT, API_KEY, DISTANCE, PERIOD, LATITUDE, LONGITUDE, SORT_BY, SEARCH_TYPE))
@@ -112,7 +120,7 @@ if __name__ == "__main__":
         # -- paying special attention to the encoding
         data = json.loads(orig_data.read().decode(encoding))
     except Exception as errorstring:
-        # Ignore errors as there's no mechanism to report errors in ICS
+        # Exit now
         sys.exit(2)
     else:
         # New calendar
@@ -139,5 +147,4 @@ if __name__ == "__main__":
 
             calendar.add(new_event)
 
-    print calendar
-    sys.exit(0)
+    return str(calendar)
