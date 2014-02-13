@@ -24,6 +24,7 @@ LATITUDE=51.47775
 LONGITUDE=0
 #===================
 
+# A map of the JSON fields to their ICS equivalent
 field_map = { "loc": "LOCATION",
               "desc": "DESCRIPTION",
               "sum": "SUMMARY",
@@ -36,56 +37,107 @@ import urllib2
 import json
 import time
 
-today = time.localtime()
+class Calendar:
+    header = "BEGIN:VCALENDAR\nX-WR-CALNAME:National Trust Events\nVERSION:2.0\nPRODID:-//Scott Wallace//NONSGML nt-ics//EN"
+    footer = "END:VCALENDAR"
 
-# Fetch the original data
-try:
-    orig_data = urllib2.urlopen("%s?apiKey=%s&distance=%s&period=%s&latitude=%s&longitude=%s&SortBy=%s&searchType=%s" % (ENDPOINT, API_KEY, DISTANCE, PERIOD, LATITUDE, LONGITUDE, SORT_BY, SEARCH_TYPE))
+    def __init__(self):
+        self.events = []
 
-    # Fetch the encoding so that we can handle special characters correctly
-    encoding = orig_data.headers['content-type'].split('charset=')[-1]
-except urllib2.URLError as errorstring:
-    # Ignore errors as there's no mechanism to report errors in ICS
-    # -- perhaps create a calendar item for "now" with the error??
-    pass
+    def add(self, event):
+        # Check it's a valid Event type and the fields are all correct:
+        if isinstance(event, Event) and event.check_fields():
+            self.events.append(event)
 
-try:
-    # Convert from JSON into native Python objects
-    # -- paying special attention to the encoding
-    data = json.loads(orig_data.read().decode(encoding))
-except Exception as errorstring:
-    # Ignore errors as there's no mechanism to report errors in ICS
-    pass
-else:
-    # Begin calendar output
-    print "BEGIN:VCALENDAR"
-    print "X-WR-CALNAME:National Trust Events"
-    print "VERSION:2.0"
-    print "PRODID:-//ABC Corporation//NONSGML My Product//EN"
+    def __str__(self):
+        output = self.header + "\n"
+        for thing in self.events:
+            output += str(thing)
+        output += self.footer + "\n"
 
-    # Loop through the events
-    for event in data["Events"]:
-        print "BEGIN:VEVENT"
-        for key,val in event.iteritems():
-            # Create usable time objects for formatting into ICS-compatible entries
-            if key == "periods":
-                time_start = time.localtime(int(val[0]["start"][6:].split("+")[0]) / 1000)
-                time_end = time.localtime(int(val[0]["end"][6:].split("+")[0]) / 1000)
+        return output
 
-                print "DTSTART:%s" % time.strftime("%Y%m%dT%H%M00Z", time_start)
-                print "DTEND:%s" % time.strftime("%Y%m%dT%H%M00Z", time_end)
+class Event:
+    mandatory_fields = [ "DTSTART", "DTEND", "SUMMARY", "LOCATION", "UID" ]
 
-            # Use the field map to determince which items to displa
-            try:
-                # Replace CRLF with '\n' and re-encode with the original encoding used
-                print "%s:%s" % (field_map[key], val.replace("\r\n", "\\n").encode(encoding))
-            except Exception as errorstring:
-                # Ignore entries that aren't in the field map
-                pass
+    header = "BEGIN:VEVENT"
+    footer = "END:VEVENT"
 
-        # DTSTAMP field is required.  Set to 'now' (-ish).
-        print "DTSTAMP:%s" % time.strftime("%Y%m%dT%H%M00Z", today)
-        print "END:VEVENT"
-    print "END:VCALENDAR"
+    def __init__(self):
+        self.fields = {}
 
-sys.exit(0)
+    def check_fields(self):
+        # Check the mandatory fields exist:
+        for field in self.mandatory_fields:
+            if field not in self.fields:
+                return False
+
+        # Check the time entries are the correct type:
+        if not isinstance(self.fields["DTSTART"], time.struct_time) or not isinstance(self.fields["DTEND"], time.struct_time):
+            return False
+
+        return True
+
+    def __str__(self):
+        # Check the basics exist
+        if self.check_fields():
+            output = self.header + "\n"
+
+            # Output the fields added
+            for key, val in self.fields.iteritems():
+                # Format time values correctly
+                if isinstance(val, time.struct_time):
+                    val = time.strftime("%Y%m%dT%H%M00Z", val)
+
+                output += "%s:%s\n" % (key, val)
+
+            output += "DTSTAMP:%s" % time.strftime("%Y%m%dT%H%M00Z", time.localtime()) + "\n"
+            output += self.footer + "\n"
+
+            return output
+
+if __name__ == "__main__":
+    # Fetch the original data
+    try:
+        orig_data = urllib2.urlopen("%s?apiKey=%s&distance=%s&period=%s&latitude=%s&longitude=%s&SortBy=%s&searchType=%s" % (ENDPOINT, API_KEY, DISTANCE, PERIOD, LATITUDE, LONGITUDE, SORT_BY, SEARCH_TYPE))
+
+        # Fetch the encoding so that we can handle special characters correctly
+        encoding = orig_data.headers['content-type'].split('charset=')[-1]
+    except urllib2.URLError as errorstring:
+        # Exit now
+        sys.exit(1)
+
+    try:
+        # Convert from JSON into native Python objects
+        # -- paying special attention to the encoding
+        data = json.loads(orig_data.read().decode(encoding))
+    except Exception as errorstring:
+        # Ignore errors as there's no mechanism to report errors in ICS
+        sys.exit(2)
+    else:
+        # New calendar
+        calendar = Calendar()
+
+        # Loop through the events
+        for event in data["Events"]:
+            new_event = Event()
+            for key,val in event.iteritems():
+                # Create usable time objects for formatting into ICS-compatible entries
+                if key == "periods":
+                    new_event.fields["DTSTART"] = time.localtime(int(val[0]["start"][6:].split("+")[0]) / 1000)
+                    new_event.fields["DTEND"] = time.localtime(int(val[0]["end"][6:].split("+")[0]) / 1000)
+                # Use the field map to determince which items to add
+                try:
+                    if val:
+                        new_event.fields[field_map[key]] = val.replace("\r\n", "\\n").encode(encoding)
+                except AttributeError as errorstring:
+                    # Ignore empty values
+                    pass
+                except KeyError as errorstring:
+                    # Ignore entries that aren't in the field map
+                    pass
+
+            calendar.add(new_event)
+
+    print calendar
+    sys.exit(0)
